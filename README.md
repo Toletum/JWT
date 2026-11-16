@@ -82,4 +82,4 @@ datos real.
 
 - Architecture: create a PR from this repository's current branch and configured Git remote.
 - [x] Inspect the working-tree changes and remote hosting setup to determine the PR scope and target.
-- [ ] Commit and push only the intended changes, then open the PR if the hosting CLI and credentials are available.
+- [x] Commit and push only the intended changes, then open the PR if the hosting CLI and credentials are available.
