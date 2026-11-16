@@ -9,7 +9,6 @@ from pydantic import BaseModel
 app = FastAPI(title="Ejemplo FastAPI + JWT Optimizado")
 
 # --- CONFIGURACIÓN DE SEGURIDAD ---
-SECRET_KEY = "tu_clave_secreta_super_segura_cambiala_en_produccion"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
@@ -21,13 +20,15 @@ USUARIOS_DB = {
         "username": "juan",
         "email": "juan@example.com",
         "password": "password123",
-        "disabled": False
+        "disabled": False,
+        "session_secret": '39e082580e07e09ed65657c1be4062e6'
     },
     "maria": {
         "username": "maria",
         "email": "maria@example.com",
         "password": "secreto456",
-        "disabled": False
+        "disabled": False,
+        "session_secret": 'fd753ad1dc0d3263b45abdca142a43b1'
     }
 }
 
@@ -54,7 +55,9 @@ def autenticar_usuario(username: str, password: str):
         return False
     return usuario
 
-def crear_token_acceso(data: dict, expires_delta: timedelta | None = None):
+def crear_token_acceso(
+    data: dict, session_secret: str, expires_delta: timedelta | None = None
+):
     to_encode = data.copy()
     if expires_delta:
         expire = datetime.now(timezone.utc) + expires_delta
@@ -62,7 +65,7 @@ def crear_token_acceso(data: dict, expires_delta: timedelta | None = None):
         expire = datetime.now(timezone.utc) + timedelta(minutes=15)
 
     to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    encoded_jwt = jwt.encode(to_encode, session_secret, algorithm=ALGORITHM)
     return encoded_jwt
 
 def obtener_usuario_actual(token: Annotated[str, Depends(oauth2_scheme)]):
@@ -72,18 +75,25 @@ def obtener_usuario_actual(token: Annotated[str, Depends(oauth2_scheme)]):
         headers={"WWW-Authenticate": "Bearer"},
     )
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        username: str | None = payload.get("sub")
+        unverified_payload = jwt.decode(token, options={"verify_signature": False})
+        username: str | None = unverified_payload.get("sub")
 
         if not username or not isinstance(username, str):
             raise credenciales_excepcion
 
+        usuario = USUARIOS_DB.get(username)
+        if usuario is None:
+            raise credenciales_excepcion
+
+        jwt.decode(
+            token,
+            usuario["session_secret"],
+            algorithms=[ALGORITHM],
+            options={"require": ["exp", "sub"]},
+        )
     except jwt.PyJWTError:
         raise credenciales_excepcion
 
-    usuario = USUARIOS_DB.get(username)
-    if usuario is None:
-        raise credenciales_excepcion
     return usuario
 
 # --- ENDPOINTS ---
@@ -110,7 +120,9 @@ async def login_para_obtener_token(
 
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = crear_token_acceso(
-        data={"sub": usuario["username"]}, expires_delta=access_token_expires
+        data={"sub": usuario["username"]},
+        session_secret=usuario["session_secret"],
+        expires_delta=access_token_expires,
     )
 
     return {"access_token": access_token, "token_type": "bearer"}
